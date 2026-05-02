@@ -5,6 +5,12 @@ from telegram.ext import (
 )
 import sqlite3
 import os
+import logging
+
+logging.basicConfig(
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 
 # ================= DATABASE =================
 conn = sqlite3.connect("users.db", check_same_thread=False)
@@ -93,6 +99,7 @@ def get_rating_text(user_id):
 
 # ================= START =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logging.info(f"User {update.effective_user.id} started the bot")
     keyboard = [
         [InlineKeyboardButton("🟡 Golden Cards", callback_data="category_gold")],
         [InlineKeyboardButton("⚪ Silver Cards", callback_data="category_silver")],
@@ -236,21 +243,25 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def save_user(update, context):
     user_id = update.effective_user.id
 
+    category = context.user_data["category"]
+    has_cards = ",".join(context.user_data["has_cards"])
+    want_cards = ",".join(context.user_data["want_cards"])
+    code = context.user_data.get("exchange_code")
+
     cursor.execute("DELETE FROM users WHERE user_id=?", (user_id,))
     cursor.execute(
         "INSERT INTO users VALUES (?, ?, ?, ?, ?)",
-        (
-            user_id,
-            context.user_data["category"],
-            ",".join(context.user_data["has_cards"]),
-            ",".join(context.user_data["want_cards"]),
-            context.user_data.get("exchange_code")
-        )
+        (user_id, category, has_cards, want_cards, code)
     )
+
+    # ✅ LOGGING (now correct)
+    logging.info(
+        f"User {user_id} submitted | HAS: {has_cards} | WANTS: {want_cards}"
+    )
+
     conn.commit()
 
     await match_users(update, context)
-
 # ================= MATCH =================
 async def match_users(update, context):
     user = update.effective_user
@@ -267,16 +278,31 @@ async def match_users(update, context):
             continue
 
         if set(me[2].split(",")) & set(other[3].split(",")) and \
-           set(me[3].split(",")) & set(other[2].split(",")):
+   set(me[3].split(",")) & set(other[2].split(",")):
 
-            other_id = other[0]
-            chat = await context.bot.get_chat(other_id)
+    other_id = other[0]
 
-            msg_me = f"🎉 Match Found!\nYou matched with: {chat.first_name}"
-            msg_me += get_rating_text(other_id)
+    # 🔍 LOGGING (detailed + safe)
+    logging.info(
+        f"MATCH FOUND: {user_id} ↔ {other_id} | "
+        f"My HAS: {me[2]} | My WANT: {me[3]} | "
+        f"Other HAS: {other[2]} | Other WANT: {other[3]}"
+    )
 
-            msg_other = f"🎉 Match Found!\nYou matched with: {user.first_name}"
-            msg_other += get_rating_text(user_id)
+    # 👤 Get other user info
+    try:
+        chat = await context.bot.get_chat(other_id)
+        other_name = chat.first_name
+    except:
+        other_name = "Unknown User"
+
+    # 📨 Message for current user
+    msg_me = f"🎉 Match Found!\nYou matched with: {other_name}"
+    msg_me += get_rating_text(other_id)
+
+    # 📨 Message for other user
+    msg_other = f"🎉 Match Found!\nYou matched with: {user.first_name}"
+    msg_other += get_rating_text(user_id)
 
             if other[4]:
                 msg_me += f"\nCode: {other[4]}"
