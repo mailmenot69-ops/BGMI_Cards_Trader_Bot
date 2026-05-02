@@ -326,6 +326,46 @@ async def rate_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await query.edit_message_text("✅ Rating submitted!")
 
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    help_text = (
+        "🤖 *BGMI Card Exchange Bot Help*\n\n"
+
+        "🎯 *What this bot does:*\n"
+        "This bot helps you exchange BGMI event cards with other players.\n\n"
+
+        "🔄 *How to use:*\n"
+        "1. Type /start\n"
+        "2. Choose a card category (Gold / Silver / Grey)\n"
+        "3. Select the cards you HAVE\n"
+        "4. Select the cards you WANT\n"
+        "5. (Optional) Enter your exchange code\n\n"
+
+        "🤝 *How matching works:*\n"
+        "You will be matched with another user if:\n"
+        "• They have a card you want\n"
+        "• You have a card they want\n"
+        "• Both selected the same category\n\n"
+
+        "🔑 *Exchange Codes:*\n"
+        "If you enter a code, it will be shared with your match.\n\n"
+
+        "👤 *User Info:*\n"
+        "You will see the name of the matched user.\n\n"
+
+        "⭐ *Rating System:*\n"
+        "After a trade, you can rate the other user.\n"
+        "Higher rating = more trustworthy trader.\n\n"
+
+        "💡 *Tips:*\n"
+        "• Select multiple cards to increase chances of matching\n"
+        "• Be honest in trades\n"
+        "• Rate users after trade\n\n"
+
+        "🚀 Good luck trading!"
+    )
+
+    await update.message.reply_text(help_text, parse_mode="Markdown")
+
 # ================= APP =================
 app = ApplicationBuilder().token(TOKEN).build()
 
@@ -339,5 +379,6 @@ app.add_handler(CallbackQueryHandler(handle_code_choice, pattern="^code_"))
 app.add_handler(CallbackQueryHandler(handle_page, pattern="^page_"))
 app.add_handler(CallbackQueryHandler(rate_user, pattern="^rate_"))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+app.add_handler(CommandHandler("help", help_command))
 
 app.run_polling()
