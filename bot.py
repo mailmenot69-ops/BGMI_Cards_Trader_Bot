@@ -34,6 +34,15 @@ CREATE TABLE IF NOT EXISTS ratings (
 )
 """)
 
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS trades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user1_id INTEGER,
+    user2_id INTEGER,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+""")
+
 conn.commit()
 
 # ================= CONFIG =================
@@ -277,32 +286,48 @@ async def match_users(update, context):
         if me[1] != other[1]:
             continue
 
-        if set(me[2].split(",")) & set(other[3].split(",")) and \
-   set(me[3].split(",")) & set(other[2].split(",")):
+        my_has = set(me[2].split(","))
+        my_want = set(me[3].split(","))
 
-    other_id = other[0]
+        other_has = set(other[2].split(","))
+        other_want = set(other[3].split(","))
 
-    # 🔍 LOGGING (detailed + safe)
-    logging.info(
-        f"MATCH FOUND: {user_id} ↔ {other_id} | "
-        f"My HAS: {me[2]} | My WANT: {me[3]} | "
-        f"Other HAS: {other[2]} | Other WANT: {other[3]}"
-    )
+        if my_has & other_want and my_want & other_has:
 
-    # 👤 Get other user info
-    try:
-        chat = await context.bot.get_chat(other_id)
-        other_name = chat.first_name
-    except:
-        other_name = "Unknown User"
+            other_id = other[0]
 
-    # 📨 Message for current user
-    msg_me = f"🎉 Match Found!\nYou matched with: {other_name}"
-    msg_me += get_rating_text(other_id)
+            logging.info(
+                f"MATCH FOUND: {user_id} ↔ {other_id} | "
+                f"My HAS: {me[2]} | My WANT: {me[3]} | "
+                f"Other HAS: {other[2]} | Other WANT: {other[3]}"
+            )
 
-    # 📨 Message for other user
-    msg_other = f"🎉 Match Found!\nYou matched with: {user.first_name}"
-    msg_other += get_rating_text(user_id)
+            # prevent duplicate trades
+            cursor.execute("""
+                SELECT * FROM trades 
+                WHERE (user1_id=? AND user2_id=?)
+                   OR (user1_id=? AND user2_id=?)
+            """, (user_id, other_id, other_id, user_id))
+
+            if not cursor.fetchone():
+                cursor.execute(
+                    "INSERT INTO trades (user1_id, user2_id) VALUES (?, ?)",
+                    (user_id, other_id)
+                )
+                conn.commit()
+
+            # get user name
+            try:
+                chat = await context.bot.get_chat(other_id)
+                other_name = chat.first_name
+            except:
+                other_name = "Unknown User"
+
+            msg_me = f"🎉 Match Found!\nYou matched with: {other_name}"
+            msg_me += get_rating_text(other_id)
+
+            msg_other = f"🎉 Match Found!\nYou matched with: {user.first_name}"
+            msg_other += get_rating_text(user_id)
 
             if other[4]:
                 msg_me += f"\nCode: {other[4]}"
@@ -312,7 +337,7 @@ async def match_users(update, context):
             await context.bot.send_message(user_id, msg_me)
             await context.bot.send_message(other_id, msg_other)
 
-            # rating buttons
+            # ⭐ rating buttons (ONLY for current user)
             keyboard = [[
                 InlineKeyboardButton("⭐1", callback_data=f"rate_{other_id}_1"),
                 InlineKeyboardButton("⭐2", callback_data=f"rate_{other_id}_2"),
@@ -322,13 +347,18 @@ async def match_users(update, context):
             ]]
 
             await context.bot.send_message(
-                user_id, "Rate this user:", reply_markup=InlineKeyboardMarkup(keyboard)
+                chat_id=user_id,
+                text="Rate this user:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
             )
 
-            return
+            return  # ✅ VERY IMPORTANT
 
-    await context.bot.send_message(user_id, "No match found yet.")
-
+    # only if NO match found
+    await context.bot.send_message(
+        chat_id=user_id,
+        text="No match found yet."
+    )
 # ================= RATING =================
 async def rate_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -392,6 +422,40 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(help_text, parse_mode="Markdown")
 
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    cursor.execute("SELECT COUNT(DISTINCT user_id) FROM users")
+    users = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM trades")
+    trades = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM ratings")
+    ratings = cursor.fetchone()[0]
+
+    msg = (
+        f"📊 Bot Stats\n\n"
+        f"👥 Users: {users}\n"
+        f"🤝 Trades: {trades}\n"
+        f"⭐ Ratings: {ratings}\n"
+    )
+
+    await update.message.reply_text(msg)
+
+async def trades_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    cursor.execute("SELECT user1_id, user2_id, timestamp FROM trades ORDER BY id DESC LIMIT 10")
+    rows = cursor.fetchall()
+
+    if not rows:
+        await update.message.reply_text("No trades yet.")
+        return
+
+    text = "📜 Recent Trades:\n\n"
+
+    for row in rows:
+        text += f"{row[0]} ↔ {row[1]} at {row[2]}\n"
+
+    await update.message.reply_text(text)
+
 # ================= APP =================
 app = ApplicationBuilder().token(TOKEN).build()
 
@@ -406,5 +470,7 @@ app.add_handler(CallbackQueryHandler(handle_page, pattern="^page_"))
 app.add_handler(CallbackQueryHandler(rate_user, pattern="^rate_"))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 app.add_handler(CommandHandler("help", help_command))
+app.add_handler(CommandHandler("stats", stats))
+app.add_handler(CommandHandler("trades", trades_list))
 
 app.run_polling()
